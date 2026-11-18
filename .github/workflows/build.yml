@@ -70,7 +70,7 @@ jobs:
 
       - name: Set up Android SDK
         if: steps.changes.outputs.build == 'true'
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install Android SDK components
         if: steps.changes.outputs.build == 'true'
