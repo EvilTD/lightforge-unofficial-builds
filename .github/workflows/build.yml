@@ -16,6 +16,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
       LIGHTFORGE_KEYSTORE_PASSWORD: ${{ secrets.LIGHTFORGE_KEYSTORE_PASSWORD }}
       LIGHTFORGE_KEY_ALIAS: ${{ secrets.LIGHTFORGE_KEY_ALIAS }}
@@ -39,24 +40,19 @@ jobs:
         run: |
           CURRENT=$(git -C upstream rev-parse HEAD)
           PREVIOUS=$(cat upstream-commit.txt 2>/dev/null || echo "")
+
           echo "commit=$CURRENT" >> "$GITHUB_OUTPUT"
 
           if [ "$CURRENT" != "$PREVIOUS" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "$CURRENT" > upstream-commit.txt
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add upstream-commit.txt
-            git commit -m "Update upstream Lightforge commit"
-            git push
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || [ "$CURRENT" != "$PREVIOUS" ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           else
-            echo "build=$([ "$CURRENT" != "$PREVIOUS" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            echo "build=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set up Java
@@ -71,6 +67,8 @@ jobs:
       - name: Set up Android SDK
         if: steps.changes.outputs.build == 'true'
         uses: android-actions/setup-android@v4
+        with:
+          packages: ''
 
       - name: Install Android SDK components
         if: steps.changes.outputs.build == 'true'
@@ -90,6 +88,7 @@ jobs:
         working-directory: upstream
         run: |
           VERSION_CODE=$((GITHUB_RUN_NUMBER + 100))
+
           ./gradlew test lint \
             -Plightforge.versionCode="$VERSION_CODE" \
             :app:assembleOfflineRelease
@@ -107,9 +106,14 @@ jobs:
           VERSION=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -1)
           CODE=$((GITHUB_RUN_NUMBER + 100))
           TAG="v${VERSION}+${CODE}"
+
           mkdir -p dist
-          cp app/build/outputs/apk/offline/release/*.apk "dist/Lightforge-${VERSION}-${CODE}.apk"
+
+          cp app/build/outputs/apk/offline/release/*.apk \
+            "dist/Lightforge-${VERSION}-${CODE}.apk"
+
           (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
@@ -132,3 +136,15 @@ jobs:
 
           Independently compiled and signed. Not affiliated with or endorsed by the original developer." \
             --prerelease
+
+      - name: Record successfully published upstream commit
+        if: steps.changes.outputs.build == 'true' && steps.changes.outputs.changed == 'true'
+        run: |
+          echo "${{ steps.changes.outputs.commit }}" > upstream-commit.txt
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add upstream-commit.txt
+          git commit -m "Update upstream Lightforge commit"
+          git push
